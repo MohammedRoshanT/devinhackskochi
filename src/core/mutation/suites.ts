@@ -24,12 +24,14 @@ export function computeMissingChecks(weakScenarios: AuthorizationScenario[], wea
   const generatedById = new Map(generated.scenarios.map((s) => [s.id, s]));
   const generatedMutations = new Map(generated.mutations.map((m) => [m.mutation.id, m]));
   const missing: MissingCheck[] = [];
+  const seen = new Set<string>();
   for (const weak of weakMutations) {
     if (weak.status !== "survived") continue;
     const strong = generatedMutations.get(weak.mutation.id);
     if (!strong || strong.status !== "caught") continue;
     for (const id of strong.caughtBy) {
-      if (present.has(id)) continue;
+      if (present.has(id) || seen.has(id)) continue;
+      seen.add(id);
       const scenario = generatedById.get(id);
       if (!scenario) continue;
       missing.push({ scenarioId: scenario.id, identityId: scenario.identityId, resourceId: scenario.resourceId, action: scenario.action, expectedOutcome: scenario.expectedOutcome });

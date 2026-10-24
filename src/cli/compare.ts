@@ -32,6 +32,10 @@ export async function runComparison(options: RunOptions): Promise<AssuranceRepor
   return withLabDatabase(options, project, async (adapter) => {
     step(`Baseline + mutation campaign for the "${TYPICAL_SUITE_NAME}" suite`);
     const typicalReport = await runMutationCampaign({ specificationName: `${project.spec.name} (${TYPICAL_SUITE_NAME} suite)`, adapter, scenarios: typicalScenarios, mutations: project.mutations });
+    if (typicalReport.outcome.status === "error" || typicalReport.outcome.status === "inconclusive") {
+      warn(`The "${TYPICAL_SUITE_NAME}" campaign ended with ${typicalReport.outcome.status}; skipping the "${GENERATED_SUITE_NAME}" campaign because the environment may not be clean.`);
+      return { ...typicalReport, comparison: { suites: [entry(TYPICAL_SUITE_NAME, typicalReport, [])] } };
+    }
     step(`Baseline + mutation campaign for the "${GENERATED_SUITE_NAME}" suite`);
     const generatedReport = await runMutationCampaign({ specificationName: project.spec.name, adapter, scenarios: project.scenarios, mutations: project.mutations });
     const suites: ComparisonSuite[] = [
