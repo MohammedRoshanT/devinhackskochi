@@ -27,6 +27,25 @@ const suite = z.object({
   results: z.array(result),
 });
 
+const mutationReport = z.object({
+  mutation: z.object({ id: text, operator: text, description: text, target: z.object({ resourceType: text, action: text }) }),
+  status: z.enum(["caught", "survived", "inconclusive"]),
+  reason: text,
+  change: z.object({ description: text, statements: z.array(text), before: text, after: text }).nullable(),
+  relevantScenarioIds: z.array(text),
+  caughtBy: z.array(text),
+  suite: suite.nullable(),
+  restoration: z.object({
+    verified: z.boolean(),
+    method: text,
+    expectedFingerprint: text.nullable(),
+    observedFingerprint: text.nullable(),
+    message: text,
+  }),
+});
+
+const outcomeStatus = z.enum(["all-caught", "survivors", "inconclusive", "error"]);
+
 const reportSchema = z.object({
   schemaVersion: z.literal(1),
   generatedAt: z.iso.datetime(),
@@ -49,23 +68,16 @@ const reportSchema = z.object({
     explanation: text,
   })),
   baseline: suite.nullable(),
-  mutations: z.array(z.object({
-    mutation: z.object({ id: text, operator: text, description: text, target: z.object({ resourceType: text, action: text }) }),
-    status: z.enum(["caught", "survived", "inconclusive"]),
-    reason: text,
-    change: z.object({ description: text, statements: z.array(text), before: text, after: text }).nullable(),
-    relevantScenarioIds: z.array(text),
-    caughtBy: z.array(text),
-    suite: suite.nullable(),
-    restoration: z.object({
-      verified: z.boolean(),
-      method: text,
-      expectedFingerprint: text.nullable(),
-      observedFingerprint: text.nullable(),
-      message: text,
-    }),
-  })),
+  mutations: z.array(mutationReport),
   baselineAfterRestore: suite.nullable(),
+  comparison: z.object({ suites: z.array(z.object({
+    name: text,
+    outcome: z.object({ status: outcomeStatus, message: text }),
+    baseline: suite.nullable(),
+    mutations: z.array(mutationReport),
+    baselineAfterRestore: suite.nullable(),
+    missingChecks: z.array(z.object({ scenarioId: text, identityId: text, resourceId: text, action: text, expectedOutcome: outcome })),
+  })) }).optional(),
   notes: z.array(text),
 });
 

@@ -6,9 +6,9 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "dev": "next dev --hostname 0.0.0.0",
+    "dev": "next dev --hostname 127.0.0.1",
     "build": "next build",
-    "start": "next start --hostname 0.0.0.0",
+    "start": "next start --hostname 127.0.0.1",
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -20,7 +20,8 @@
     "db:stop": "tsx src/cli/db.ts stop",
     "check": "npm run test && npm run typecheck && npm run lint && npm run build",
     "validate": "tsx src/cli/validate.ts",
-    "hooks:install": "sh scripts/install-hooks.sh"
+    "hooks:install": "sh scripts/install-hooks.sh",
+    "lab:compare": "tsx src/cli/compare.ts"
   },
   "dependencies": {
     "next": "^16.4.3",

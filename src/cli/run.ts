@@ -14,13 +14,13 @@ export interface RunOptions {
   keepDb: boolean;
   reuseDb: boolean;
 }
-const ok = (text: string) => styleText("green", text);
-const bad = (text: string) => styleText("red", text);
-const warn = (text: string) => styleText("yellow", text);
-const dim = (text: string) => styleText("dim", text);
-const step = (text: string) => console.log(styleText("bold", `\n▸ ${text}`));
+export const ok = (text: string) => styleText("green", text);
+export const bad = (text: string) => styleText("red", text);
+export const warn = (text: string) => styleText("yellow", text);
+export const dim = (text: string) => styleText("dim", text);
+export const step = (text: string) => console.log(styleText("bold", `\n▸ ${text}`));
 
-function printSuite(title: string, suite: SuiteRun | null) {
+export function printSuite(title: string, suite: SuiteRun | null) {
   if (!suite) return;
   console.log(`  ${title}: ${suite.allPassed ? ok(`${suite.passed}/${suite.total} passed`) : bad(`${suite.passed}/${suite.total} passed, ${suite.failed} failed, ${suite.errors} errors`)}`);
   for (const r of suite.results) {
@@ -31,7 +31,7 @@ function printSuite(title: string, suite: SuiteRun | null) {
   }
 }
 
-function printReport(report: AssuranceReport) {
+export function printReport(report: AssuranceReport) {
   step("Environment checks");
   for (const c of report.environment.checks) console.log(`  ${c.passed ? ok("✔") : bad("✘")} ${c.name} ${dim(c.detail)}`);
   step("Baseline (original policies)");
@@ -56,12 +56,10 @@ function printReport(report: AssuranceReport) {
   console.log(`\n${colour(`Outcome: ${report.outcome.status}`)} — ${report.outcome.message}`);
 }
 
-export async function run(options: RunOptions): Promise<number> {
-  step("Loading specification");
-  const project = await loadProject(options.example);
-  console.log(`  ${project.spec.name}: ${project.scenarios.length} generated scenarios, ${project.mutations.length} mutation(s)`);
-  for (const warning of project.warnings) console.log(`  ${warn("warning:")} ${warning.message}`);
+type Project = Awaited<ReturnType<typeof loadProject>>;
 
+/** Disposable-container lifecycle shared by lab, validate and lab:compare. */
+export async function withLabDatabase<T>(options: Pick<RunOptions, "keepDb" | "reuseDb">, project: Project, fn: (adapter: PostgresRlsAdapter) => Promise<T>): Promise<T> {
   const container = defaultContainer;
   const admin = adminConnection(container);
   const manageContainer = !options.reuseDb;
@@ -73,21 +71,33 @@ export async function run(options: RunOptions): Promise<number> {
     await waitForPostgres(admin);
     step("Initializing schema, roles and RLS policies");
     await initializeDatabase(admin, project.target, project.schemaSql);
-
-    const adapter = new PostgresRlsAdapter(project.target, adminConnection(container, project.target.database));
-    const report = await runMutationCampaign({ specificationName: project.spec.name, adapter, scenarios: project.scenarios, mutations: project.mutations });
-    printReport(report);
-
-    const reportPath = resolve(process.cwd(), options.report);
-    await mkdir(dirname(reportPath), { recursive: true });
-    await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
-    console.log(dim(`Report written to ${reportPath}`));
-    return report.outcome.status === "all-caught" ? 0 : report.outcome.status === "survivors" ? 2 : 1;
+    return await fn(new PostgresRlsAdapter(project.target, adminConnection(container, project.target.database)));
   } finally {
     if (manageContainer && !options.keepDb) {
       await stopContainer(container).catch((error: unknown) => console.error(bad(`Failed to remove container: ${String(error)}`)));
       console.log(dim(`Removed disposable container ${container.name}`));
     }
   }
+}
+
+/** Write the report JSON and return the standard exit code (0 caught / 2 survived / 1 other). */
+export async function finishRun(report: AssuranceReport, reportPathOption: string): Promise<number> {
+  const reportPath = resolve(process.cwd(), reportPathOption);
+  await mkdir(dirname(reportPath), { recursive: true });
+  await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
+  console.log(dim(`Report written to ${reportPath}`));
+  return report.outcome.status === "all-caught" ? 0 : report.outcome.status === "survivors" ? 2 : 1;
+}
+
+export async function run(options: RunOptions): Promise<number> {
+  step("Loading specification");
+  const project = await loadProject(options.example);
+  console.log(`  ${project.spec.name}: ${project.scenarios.length} generated scenarios, ${project.mutations.length} mutation(s)`);
+  for (const warning of project.warnings) console.log(`  ${warn("warning:")} ${warning.message}`);
+  return withLabDatabase(options, project, async (adapter) => {
+    const report = await runMutationCampaign({ specificationName: project.spec.name, adapter, scenarios: project.scenarios, mutations: project.mutations });
+    printReport(report);
+    return finishRun(report, options.report);
+  });
 }
 
