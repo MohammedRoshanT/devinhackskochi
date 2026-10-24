@@ -21,7 +21,7 @@
 | Term | Meaning |
 |---|---|
 | **Caught** | The mutation was applied cleanly and at least one test observed an outcome that contradicts the specification. |
-| **Survived** | Every relevant test still matched the spec — your test suite has a **blind spot** (not automatically a production vulnerability). |
+| **Survived** | Every relevant test still matched the spec — your test suite has a **blind spot** — it may be missing checks, or its data may be unable to distinguish the original policy from the mutated one (not automatically a production vulnerability). |
 | **Inconclusive** | The mutation could not be applied, or a test errored under it. Errors are never counted as detection. |
 | **Error** | Setup, baseline or restoration failed, so the run stopped without making a detection claim. |
 | **Restoration verified** | The authorization configuration after rollback was re-read on a fresh connection and is identical to the pre-mutation fingerprint. |
@@ -37,7 +37,7 @@
 
 ## Quick start (from a fresh clone)
 
-**Prerequisites:** Git · Node.js 22+ and npm · Docker installed **and running**. Nothing else — no Supabase CLI, no `psql`; the database is a disposable Docker container the tool manages itself.
+**Prerequisites:** Git · Node.js 24 (matches `.nvmrc`) and npm · Docker installed **and running**. Nothing else — no Supabase CLI, no `psql`; the database is a disposable Docker container the tool manages itself.
 
 ```bash
 git clone https://github.com/MohammedRoshanT/devinhackskochi.git
@@ -55,6 +55,7 @@ Or skip the dashboard entirely and run everything in the terminal:
 
 ```bash
 npm run lab          # full pipeline: container → baseline → mutation → restore → report
+npm run lab:compare  # same pipeline twice: weak "typical" suite vs the generated suite
 npm run validate     # same run, prints VALIDATION PASSED/FAILED (meant for CI/hooks)
 npm test             # 55 unit tests (no Docker needed)
 npm run test:integration   # 9 tests against a real disposable container (needs Docker)
@@ -94,6 +95,17 @@ npm run test:integration   # 9 tests against a real disposable container (needs 
 6. **Baseline again** — the suite re-runs to confirm the original behaviour is intact.
 7. **Report** — structured JSON at `reports/assurance-report.json`; the dashboard renders exactly what the engine wrote.
 
+### Comparing a weak suite with the generated suite — `npm run lab:compare`
+
+The `typical` suite is three owner-only checks taken from the same generated scenarios (read own note, update own note,
+one more owner check) — no cross-user scenario. Running `npm run lab:compare` executes the exact same mutation campaign
+against it and against the full generated suite, then writes one combined report (the generated suite's report plus a
+`comparison.suites` section). In the real run, the typical suite's baseline passes 3/3 — yet the permissive-read mutation
+**survives** because nothing in it ever reads another user's note, while the generated suite catches it via
+`case:alice:note-b:read` and `case:bob:note-a:read`. The dashboard shows both suites side by side and lists the
+"Checks missing from this suite". Exit codes mirror `npm run lab`, applied to the generated suite's outcome:
+0 = all caught, 2 = a mutation survived, 1 = error or inconclusive.
+
 ### Real report (from the run above)
 
 ```json
@@ -116,6 +128,7 @@ npm run test:integration   # 9 tests against a real disposable container (needs 
 | `npm run dev` | Dashboard dev server on :3000 |
 | `npm run build` / `npm start` | Production build / server |
 | `npm run lab` | Full mutation-testing run (exit 0 caught / 2 survived / 1 error) |
+| `npm run lab:compare` | Runs the campaign twice — a small `typical` owner-only suite and the full generated suite — and writes one combined report |
 | `npm run validate` | Same run + `VALIDATION PASSED/FAILED` banner; same exit codes |
 | `npm test` / `npm run test:integration` | Unit tests / real-container tests |
 | `npm run typecheck` · `lint` · `check` | TypeScript, ESLint (0 warnings), everything |
@@ -171,7 +184,7 @@ Rules are evaluated with **default-deny** semantics; an allow and a deny matchin
 
 ## Safety and limits
 
-- **Disposable-local only.** Connections to non-127.0.0.1/localhost hosts are refused in code; the container is ephemeral; mutations run in rolled-back transactions. Nothing here can target a remote or production database.
+- **Local binding.** The dashboard binds to `127.0.0.1` and its API routes reject non-local `Host` headers.\n- **Disposable-local only.** Connections to non-127.0.0.1/localhost hosts are refused in code; the container is ephemeral; mutations run in rolled-back transactions. Nothing here can target a remote or production database.
 - **Current scope:** one adapter (`postgres-rls`), one mutation operator (`permissive-condition` on the notes SELECT policy), SELECT and UPDATE mapped. It does **not** scan arbitrary GitHub repositories, HTTP APIs, Supabase projects or other frameworks — the `AuthorizationAdapter` interface exists so more adapters can be added.
 - **Semantics:** a *survived* mutation means a test-suite blind spot, not automatically a production vulnerability; results come from an isolated test environment, not a real deployment.
 - Test identity via `app.current_user_id` is a **test adapter mechanism**, not a claim about any real authentication integration.
