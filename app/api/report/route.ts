@@ -1,14 +1,18 @@
 import { readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
 import { parseReport } from "@/app/lib/report";
 import type { ReportResponse } from "@/app/lib/lab-types";
 import { DEFAULT_REPORT_PATH } from "@/src/cli/paths";
+import { isLocalHostHeader } from "@/app/lib/host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  if (!isLocalHostHeader(request.headers.get("host"))) {
+    return NextResponse.json({ error: "This dashboard only serves requests addressed to localhost." }, { status: 403 });
+  }
   const file = join(/* turbopackIgnore: true */ process.cwd(), DEFAULT_REPORT_PATH);
   let body: ReportResponse;
   try {

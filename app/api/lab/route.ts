@@ -1,17 +1,24 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { getLabRun, startLabRun } from "@/app/lib/lab-runner";
+import { isLocalHostHeader } from "@/app/lib/host";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 const noStore = { "cache-control": "no-store" };
 
-export function GET() {
+export function GET(request: NextRequest) {
+  if (!isLocalHostHeader(request.headers.get("host"))) {
+    return NextResponse.json({ error: "This dashboard only serves requests addressed to localhost." }, { status: 403 });
+  }
   return NextResponse.json(getLabRun(), { headers: noStore });
 }
 
 /** Starts the fixed lab command. The request body is ignored; nothing from the browser reaches the process. */
 export function POST(request: NextRequest) {
+  if (!isLocalHostHeader(request.headers.get("host"))) {
+    return NextResponse.json({ error: "This dashboard only serves requests addressed to localhost." }, { status: 403 });
+  }
   if (process.env.AAL_DISABLE_LAB_RUNS === "1") {
     return NextResponse.json({ error: "Lab runs are disabled on this server (AAL_DISABLE_LAB_RUNS=1). Run npm run lab in a terminal." }, { status: 403 });
   }
