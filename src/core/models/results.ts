@@ -97,4 +97,25 @@ export interface AssuranceReport {
   mutations: MutationReport[];
   baselineAfterRestore: SuiteRun | null;
   notes: string[];
+  /** Present only in reports written by `npm run lab:compare`. */
+  comparison?: { suites: ComparisonSuite[] };
+}
+
+export interface MissingCheck {
+  scenarioId: string;
+  identityId: string;
+  resourceId: string;
+  action: string;
+  expectedOutcome: AuthorizationOutcome;
+}
+
+/** Per-suite entry inside a combined comparison report (`npm run lab:compare`). */
+export interface ComparisonSuite {
+  name: string;
+  outcome: { status: "all-caught" | "survivors" | "inconclusive" | "error"; message: string };
+  baseline: SuiteRun | null;
+  mutations: MutationReport[];
+  baselineAfterRestore: SuiteRun | null;
+  /** Scenarios that caught a mutation in the generated suite but are absent from this suite. */
+  missingChecks: MissingCheck[];
 }

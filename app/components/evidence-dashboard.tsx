@@ -4,7 +4,9 @@ import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react
 import type { LabRunState, ReportResponse } from "@/app/lib/lab-types";
 import type { AssuranceReport, AuthorizationScenario, MutationReport, ScenarioResult, SuiteRun } from "@/src/core/models/results";
 
-type Tone = "green" | "red" | "amber" | "violet" | "slate" | "sky";
+import { ComparisonPanel } from "./comparison-panel";
+
+export type Tone = "green" | "red" | "amber" | "violet" | "slate" | "sky";
 const TONES: Record<Tone, string> = {
   green: "bg-emerald-50 text-emerald-800 ring-emerald-600/30",
   red: "bg-red-50 text-red-800 ring-red-600/30",
@@ -40,11 +42,11 @@ const EXIT_CODES: Record<number, string> = {
 };
 const KEY_EVIDENCE = ["rowsReturned", "rowsAffected", "dataChanged", "sqlstate"];
 
-function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
+export function Badge({ tone, children }: { tone: Tone; children: ReactNode }) {
   return <span className={`inline-flex items-center whitespace-nowrap rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset ${TONES[tone]}`}>{children}</span>;
 }
 
-function Section({ title, subtitle, children, actions }: { title: string; subtitle?: ReactNode; children: ReactNode; actions?: ReactNode }) {
+export function Section({ title, subtitle, children, actions }: { title: string; subtitle?: ReactNode; children: ReactNode; actions?: ReactNode }) {
   return (
     <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
       <header className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 px-5 py-4">
@@ -288,6 +290,8 @@ function ReportView({ report, modifiedAt, path }: { report: AssuranceReport; mod
         </StatCard>
         <StatCard label="4 · Baseline after restore" tone={report.baselineAfterRestore ? (report.baselineAfterRestore.allPassed ? "green" : "red") : "slate"}><SuiteSummary suite={report.baselineAfterRestore} /></StatCard>
       </div>
+
+      {report.comparison && <ComparisonPanel suites={report.comparison.suites} />}
 
       {report.mutations.map((m) => <MutationCard key={m.mutation.id} mutation={m} scenarios={scenarios} />)}
 
