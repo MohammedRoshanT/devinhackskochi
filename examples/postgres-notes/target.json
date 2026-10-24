@@ -1,0 +1,24 @@
+{
+  "database": "aal_lab",
+  "ownerRole": "aal_owner",
+  "appRole": "aal_app",
+  "identitySetting": "app.current_user_id",
+  "identityFunction": "app.current_user_id",
+  "resourceTypes": {
+    "note": {
+      "schema": "public",
+      "table": "notes",
+      "idColumn": "id",
+      "ownerColumn": "owner_id",
+      "actions": {
+        "read": {
+          "operation": "select"
+        },
+        "update": {
+          "operation": "update",
+          "column": "body"
+        }
+      }
+    }
+  }
+}

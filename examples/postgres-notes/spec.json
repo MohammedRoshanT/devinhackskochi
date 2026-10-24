@@ -1,0 +1,105 @@
+{
+  "version": 1,
+  "name": "Owner-scoped notes (PostgreSQL RLS demo)",
+  "defaultOutcome": "deny",
+  "roles": [
+    "member"
+  ],
+  "identities": [
+    {
+      "id": "alice",
+      "roles": [
+        "member"
+      ]
+    },
+    {
+      "id": "bob",
+      "roles": [
+        "member"
+      ]
+    }
+  ],
+  "resourceTypes": [
+    {
+      "id": "note",
+      "actions": [
+        "read",
+        "update"
+      ]
+    }
+  ],
+  "resources": [
+    {
+      "id": "note-a",
+      "type": "note",
+      "ownerId": "alice"
+    },
+    {
+      "id": "note-b",
+      "type": "note",
+      "ownerId": "bob"
+    }
+  ],
+  "rules": [
+    {
+      "id": "members-manage-own-notes",
+      "effect": "allow",
+      "subject": {
+        "kind": "role",
+        "role": "member"
+      },
+      "resource": {
+        "kind": "type",
+        "type": "note"
+      },
+      "actions": [
+        "read",
+        "update"
+      ],
+      "ownership": "owner"
+    },
+    {
+      "id": "members-no-cross-user-access",
+      "effect": "deny",
+      "subject": {
+        "kind": "role",
+        "role": "member"
+      },
+      "resource": {
+        "kind": "type",
+        "type": "note"
+      },
+      "actions": [
+        "read",
+        "update"
+      ],
+      "ownership": "non-owner"
+    }
+  ],
+  "expectations": [
+    {
+      "identityId": "alice",
+      "resourceId": "note-a",
+      "action": "read",
+      "outcome": "allow"
+    },
+    {
+      "identityId": "bob",
+      "resourceId": "note-b",
+      "action": "read",
+      "outcome": "allow"
+    },
+    {
+      "identityId": "alice",
+      "resourceId": "note-b",
+      "action": "read",
+      "outcome": "deny"
+    },
+    {
+      "identityId": "bob",
+      "resourceId": "note-a",
+      "action": "update",
+      "outcome": "deny"
+    }
+  ]
+}

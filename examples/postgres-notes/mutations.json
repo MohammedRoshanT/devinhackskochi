@@ -1,0 +1,11 @@
+[
+  {
+    "id": "notes-read-permissive",
+    "operator": "permissive-condition",
+    "description": "Weaken the notes SELECT policy from an ownership restriction to USING (true).",
+    "target": {
+      "resourceType": "note",
+      "action": "read"
+    }
+  }
+]
