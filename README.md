@@ -1,217 +1,178 @@
 # Authorization Assurance Lab
 
-Developer security platform for Devin Hacks Kochi — Track 2: *Make the Invisible Visible*.
+**Do your authorization tests notice when a policy breaks?** This tool writes authorization tests for you, runs them against real PostgreSQL Row Level Security (RLS), deliberately *breaks* one policy inside a disposable test database, and measures whether your tests catch the regression — with evidence, not guesses.
 
-The long-term goal: generate authorization tests from declared permission rules, run them against applications through
-backend adapters, inject controlled security mutations in isolated test environments, and measure whether the tests
-catch authorization regressions.
+![Dashboard showing an all-caught mutation run](docs/screenshots/dashboard-overview.png)
 
-**Milestone 1 (this code)** covers only the foundation: a permission specification format, validation, deterministic
-expected-scenario generation, and a dashboard to view them. Nothing is executed against an application, and generated
-scenarios are **not** security findings.
+---
 
-## Getting started
+## What this project does (plain language)
 
-Requires Node.js 22+ and npm.
+**Authorization** answers "who is allowed to do what?" — e.g. *Alice may read her own notes but not Bob's.* Most teams declare those rules once (an RLS policy, a middleware check) and then hope tests would notice if the rule weakened. This lab makes that measurable.
+
+- **Alice and Bob each have private notes.** A permission specification declares the rules (see the one worked example in `examples/postgres-notes/`).
+- The engine **generates deterministic test scenarios** from those rules: Alice reads her note (allow), Alice reads Bob's note (deny), Bob edits Alice's note (deny), etc.
+- It **runs the baseline suite** against a fresh, disposable PostgreSQL 16 container with real RLS policies — every test must pass before anything is mutated.
+- It then **injects a controlled mutation**: `ALTER POLICY notes_select_own USING (true)` — the ownership check is replaced by "everyone can read everything" inside a transaction that is always rolled back.
+- It re-runs the affected tests. If any of them observe Bob's note being returned to Alice — which is exactly what the broken policy now allows — the mutation is **caught**.
+
+### Result vocabulary
+
+| Term | Meaning |
+|---|---|
+| **Caught** | The mutation was applied cleanly and at least one test observed an outcome that contradicts the specification. |
+| **Survived** | Every relevant test still matched the spec — your test suite has a **blind spot** (not automatically a production vulnerability). |
+| **Inconclusive** | The mutation could not be applied, or a test errored under it. Errors are never counted as detection. |
+| **Error** | Setup, baseline or restoration failed, so the run stopped without making a detection claim. |
+| **Restoration verified** | The authorization configuration after rollback was re-read on a fresh connection and is identical to the pre-mutation fingerprint. |
+| **declared** | The scenario's expected outcome is pinned in the spec's `expectations` list as well as derived from rules; the validator rejects the spec if they disagree. |
+
+![The caught mutation with evidence](docs/screenshots/mutation-evidence.png)
+
+*Above: the exact SQL applied, the two cross-user reads that detected it (`rowsReturned=1` where 0 was expected), and the restoration check.*
+
+![Full test results and environment checks](docs/screenshots/test-results-and-environment.png)
+
+---
+
+## Quick start (from a fresh clone)
+
+**Prerequisites:** Git · Node.js 22+ and npm · Docker installed **and running**. Nothing else — no Supabase CLI, no `psql`; the database is a disposable Docker container the tool manages itself.
 
 ```bash
-npm install
-npm run dev        # http://localhost:3000
-npm test           # Vitest unit tests
-npm run typecheck  # tsc --noEmit (strict mode)
-npm run lint       # ESLint, zero warnings
-npm run build      # production build
-npm run check      # all of the above
+git clone https://github.com/MohammedRoshanT/devinhackskochi.git
+cd devinhackskochi
+npm install          # ~30s: installs dependencies
+
+npm run dev          # starts the dashboard
 ```
 
-## Layout
+Open **http://localhost:3000** and click **Run lab**. The server runs the fixed command `npm run lab` for you (the browser cannot change the command or the database target); the run takes ~10–20 seconds and the report then appears on the page.
 
-| Path | Purpose |
-| --- | --- |
-| `src/core/rules/` | Specification schema (`schema.ts`), validation (`validation.ts`), rule matching (`evaluation.ts`), bundled example |
-| `src/core/generation/` | Deterministic scenario generator |
-| `src/core/models/` | Typed scenario model plus execution/mutation result contracts for future adapters |
-| `app/` | Next.js App Router dashboard |
-| `tests/` | Vitest unit tests |
+Windows PowerShell: the commands are identical — run them in PowerShell inside the project folder. WSL2 is also fine as long as Docker is reachable from it.
 
-`src/core` has no React, Next.js, or backend SDK imports. ESLint (`no-restricted-imports`) and a unit test enforce this.
+Or skip the dashboard entirely and run everything in the terminal:
 
-## Permission specification (version 1)
+```bash
+npm run lab          # full pipeline: container → baseline → mutation → restore → report
+npm run validate     # same run, prints VALIDATION PASSED/FAILED (meant for CI/hooks)
+npm test             # 55 unit tests (no Docker needed)
+npm run test:integration   # 9 tests against a real disposable container (needs Docker)
+```
+
+![Real npm run lab output](docs/screenshots/terminal-lab.png)
+
+*Actual terminal output: the mutation was caught by the two cross-user read tests, restoration was verified, and the baseline passed again — exit code 0.*
+
+### Stopping and cleanup
+
+- Stop the dashboard with `Ctrl+C`.
+- `npm run lab`/`validate` always removes their container automatically. If you started one manually with `npm run db:start`, remove it with `npm run db:stop`.
+
+### Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Cannot connect to the Docker daemon` / container won't start | Start Docker Desktop (Windows/macOS) or `sudo systemctl start docker` (Linux), then retry. |
+| `node`/`npm` not found | Install Node.js 22+ ([nodejs.org](https://nodejs.org)) or activate your version manager (`nvm use 22`). |
+| Port 3000 already in use | Stop the other process or run `npm run dev -- --port 3001`. |
+| Port 55432 in use | Another `aal-postgres-lab` container may be running: `docker rm -f aal-postgres-lab`. |
+| Dashboard says "No report yet" | Click **Run lab** or run `npm run lab` once; the page reads `reports/assurance-report.json`. |
+| Tests failing | Run `npm test` first (no Docker). `npm run test:integration` needs Docker running. |
+
+---
+
+## How a run works
+
+`npm run lab` executes this lifecycle every time:
+
+1. **Environment** — a disposable `postgres:16-alpine` container on `127.0.0.1:55432` (auto-removed). Safeguards are checked first: the app role `aal_app` is non-superuser `NOBYPASSRLS`, the table owner `aal_owner` has `FORCE RLS`, and connections to any non-local host are refused in code.
+2. **Baseline** — all 8 generated scenarios run as `aal_app` as a specific test user (identity is a PostgreSQL session setting, `app.current_user_id`). Denied SELECTs are observed as **0 rows**, denied UPDATEs as `rowsAffected=0, dataChanged=false`. The run aborts if the secure baseline doesn't pass.
+3. **Mutation** — inside one rolled-back transaction: `ALTER POLICY … USING (true)`, then the relevant scenarios re-run and observe the uncommitted DDL.
+4. **Classification** — caught / survived / inconclusive per mutation, from real evidence only.
+5. **Restoration** — the transaction rolls back; a fingerprint of policies, grants, table settings and the identity helper is re-read on a fresh connection and must equal the pre-mutation fingerprint.
+6. **Baseline again** — the suite re-runs to confirm the original behaviour is intact.
+7. **Report** — structured JSON at `reports/assurance-report.json`; the dashboard renders exactly what the engine wrote.
+
+### Real report (from the run above)
 
 ```json
 {
-  "version": 1,
-  "name": "Team notes workspace",
-  "defaultOutcome": "deny",
-  "roles": ["member", "admin"],
-  "identities": [{ "id": "alice", "roles": ["member"] }],
-  "resourceTypes": [{ "id": "note", "actions": ["read", "update", "delete"] }],
-  "resources": [{ "id": "note-a", "type": "note", "ownerId": "alice" }],
-  "rules": [
-    {
-      "id": "members-own-notes",
-      "effect": "allow",
-      "subject": { "kind": "role", "role": "member" },
-      "resource": { "kind": "type", "type": "note" },
-      "actions": ["read", "update", "delete"],
-      "ownership": "owner"
-    }
-  ]
+  "outcome": { "status": "all-caught" },
+  "baseline": { "total": 8, "passed": 8 },
+  "mutations": [{ "status": "caught",
+    "caughtBy": ["case:alice:note-b:read", "case:bob:note-a:read"],
+    "restoration": { "verified": true } }],
+  "baselineAfterRestore": { "total": 8, "passed": 8 }
 }
 ```
 
-- `subject`: `{ "kind": "any" }`, `{ "kind": "identity", "identityId": "..." }`, or `{ "kind": "role", "role": "..." }`.
-- `resource`: `{ "kind": "type", "type": "..." }` or `{ "kind": "instance", "resourceId": "..." }`.
-- `ownership`: `any`, `owner` (the identity owns the resource), or `non-owner` (the resource has an owner who is someone else).
+---
 
-The generator produces one scenario per declared identity × resource × action of that resource's type, sorted by
-identity, resource, then action. Each scenario records the expected outcome, whether it came from an explicit rule or the
-default, and which rules matched. Scenario IDs look like `case:<identity>:<resource>:<action>`.
+## Command reference
 
-### Validation
+| Command | What it does |
+|---|---|
+| `npm run dev` | Dashboard dev server on :3000 |
+| `npm run build` / `npm start` | Production build / server |
+| `npm run lab` | Full mutation-testing run (exit 0 caught / 2 survived / 1 error) |
+| `npm run validate` | Same run + `VALIDATION PASSED/FAILED` banner; same exit codes |
+| `npm test` / `npm run test:integration` | Unit tests / real-container tests |
+| `npm run typecheck` · `lint` · `check` | TypeScript, ESLint (0 warnings), everything |
+| `npm run db:start` · `db:init` · `db:stop` | Manually manage the disposable DB for inspection |
+| `npm run hooks:install` | Optional pre-push hook (below) |
 
-Rejected specifications return structured issues (`syntax`, `schema`, `duplicate`, `reference`, `contradiction`, `limit`)
-with a JSON path. Checks: strict schema (unknown keys rejected), unique identifiers, every role/identity/type/resource/action
-reference declared, actions valid for the targeted resource type, and at most 10,000 generated scenarios.
+`lab`, `validate` and `db:init` accept `--example <dir>` (project fixture directory), `--config <file>`, `--report <file>`, `--keep-db`, `--reuse-db`. Defaults come from `aal.config.json` when present, else `examples/postgres-notes`.
 
-### Semantics and documented ambiguities
-
-The validator rejects ambiguous inputs instead of guessing:
-
-- **Default deny only.** `defaultOutcome` must be `"deny"`. Anything not explicitly allowed is expected to be denied.
-- **No precedence between allow and deny.** If allow and deny rules both match the same identity/resource/action, the
-  specification is rejected as contradictory. There is no "deny overrides" or "most specific wins" rule. Overlapping
-  rules with the *same* effect are fine, and all of them are listed in `matchedRuleIds`.
-- **Unowned resources.** A resource without `ownerId` matches neither `owner` nor `non-owner` rules, only `any`.
-- **Closed world.** Contradictions are checked only across *declared* identities and resources. A rule that matches no
-  declared case is accepted with an `unmatched-rule` warning, because it may conflict with entities added later.
-- **Multiple roles** are combined: an identity matches every rule that targets any of its roles.
-
-## End-to-end mutation workflow (PostgreSQL RLS)
-
-One command starts a disposable PostgreSQL 16 container, creates the demo schema, runs the generated authorization tests,
-applies a controlled mutation, checks whether the tests catch it, verifies restoration, and removes the container:
-
-```bash
-. ~/.nvm/nvm.sh
-npm run lab            # exit code 0 = all mutations caught, 2 = a mutation survived, 1 = error/inconclusive
-```
-
-Options: `--keep-db` (leave the container running), `--reuse-db` (use a container started with `npm run db:start`),
-`--report <path>` (default `reports/assurance-report.json`), `--example <dir>` (default `examples/postgres-notes`).
-Separate steps: `npm run db:start`, `npm run db:init`, `npm run db:stop`. Requires Docker. Set `AAL_PG_PORT` to change
-the host port (default 55432).
-
-**Inputs** (`examples/postgres-notes/`): `spec.json` (permission specification, including declared `expectations`, which
-must agree with the rules), `mutations.json`, `target.json` (adapter mapping from resource types and actions to tables and
-SQL operations), and `schema.sql` (the system under test: a `notes` table with ownership-based RLS policies).
-
-**Isolation and safety**
-- The container uses `postgres:16-alpine`, binds to `127.0.0.1` only, and keeps its data in `tmpfs`. The adapter refuses
-  non-local hosts. Only containers labelled by the lab are ever removed.
-- The table is owned by `aal_owner` with `FORCE ROW LEVEL SECURITY`. Tests run as `aal_app` (no superuser, no
-  `BYPASSRLS`, not the owner) via `SET LOCAL ROLE`; each run checks this before executing.
-- Every scenario runs inside a savepoint of a transaction that is always rolled back, so probe writes are never kept.
-- The mutation (`ALTER POLICY … USING (true)`) and the mutated-policy tests run in a single transaction on one connection
-  and are rolled back whether the tests pass, fail or throw. Server-side `statement_timeout`, `lock_timeout` and
-  `idle_in_transaction_session_timeout` mean a crashed or hung client cannot keep the change open; PostgreSQL aborts
-  uncommitted DDL when the connection drops. Afterwards a fresh connection compares tables, policies, grants and the
-  identity helper with the pre-mutation snapshot, and the full baseline is re-run.
-
-**Test identity (test adapter only).** The adapter sets the identity with `set_config('app.current_user_id', <id>, true)`
-and policies read it through `app.current_user_id()`. This simulates an authenticated user for testing; it is not an
-authentication integration and does not model how a real application establishes identity.
-
-**How outcomes are observed**
-- Read: the superuser first confirms the row exists, then the app role runs `SELECT`. Zero rows means denied (RLS filters
-  rows silently rather than raising an error); one row means allowed.
-- Update: the app role runs `UPDATE`; the adapter records rows affected, then checks as the superuser whether the data
-  actually changed. A disagreement between the two, or any unexpected SQL error, is reported as an error, not a result.
-
-**Mutation status**
-- `caught`: the mutation applied cleanly and at least one relevant scenario observed an outcome different from the spec.
-- `survived`: every relevant scenario still matched the spec. This is a blind spot in the generated suite, not
-  automatically a production vulnerability.
-- `inconclusive`: the mutation could not be applied, or any scenario errored. Errors are never counted as detection.
-- Mutations only run if the baseline fully passes; the campaign stops with `error` if restoration cannot be verified.
-
-The JSON report (`AssuranceReport` in `src/core/models/results.ts`) contains environment checks, generated scenarios,
-baseline results with evidence (rows returned, rows affected, data changed), each mutation's exact SQL with the policy
-before and after, expected versus observed outcomes, status and reason, restoration verification, and the re-run baseline.
-
-**Tests:** `npm test` (unit, including a fake adapter for the engine) and `npm run test:integration` (Docker; covers the
-caught mutation, an injected failure after the mutation is applied, an inapplicable mutation, a surviving mutation, and a
-connection dropped before rollback).
-
-**Architecture:** `src/core/` stays framework-independent (ESLint forbids importing `pg`, `node:*`, adapters, CLI, React,
-Next.js or Supabase there). `src/core/mutation/engine.ts` defines the `AuthorizationAdapter` interface and the campaign
-logic; `src/adapters/postgres/` is the only implementation; `src/cli/` wires them together.
-
-## Validating authorization before a push
-
-`npm run validate` runs the full validation for the project configured in `aal.config.json`: it starts the disposable
-local PostgreSQL container, requires the secure baseline to pass, applies each mutation in a rolled-back transaction,
-verifies restoration against the captured authorization-state fingerprint, and re-runs the baseline.
-
-Exit codes: `0` validated (all mutations caught), `2` a mutation survived, `1` anything else failed — baseline failure,
-environment failure, an inconclusive mutation, unverified restoration, or an execution error. The structured report is
-written to `reports/assurance-report.json`.
-
-### Project configuration (`aal.config.json`)
+### Project configuration — `aal.config.json`
 
 ```json
-{
-  "version": 1,
-  "adapter": "postgres-rls",
-  "project": { "dir": "examples/postgres-notes" }
-}
+{ "version": 1, "adapter": "postgres-rls", "project": { "dir": "examples/postgres-notes" } }
 ```
 
-`project.dir` points to a directory containing `spec.json`, `schema.sql`, `mutations.json` and `target.json`, relative to
-the config file. `postgres-rls` is currently the only supported adapter value; unknown adapters and unknown fields are
-rejected. `--config`, `--example` and `--report` flags override the config. There is deliberately no repository-URL field:
-the tool only tests a checked-out local project against the disposable local database — never a remote host
-(`assertLocal` refuses non-local connections).
+`project.dir` points to a directory containing `spec.json`, `schema.sql`, `mutations.json`, `target.json`. `postgres-rls` is the only adapter value today; unknown adapters **and** unknown fields are rejected — there is deliberately no repository-URL field. The tool tests a checked-out local project against a local disposable database, nothing else.
 
 ### Optional pre-push hook
 
 ```bash
-npm run hooks:install
+npm run hooks:install   # copies scripts/git-hooks/pre-push → .git/hooks/ (this repo only)
 ```
 
-This copies `scripts/git-hooks/pre-push` to `.git/hooks/pre-push` (local repo only — nothing global is touched) and makes
-it run `npm run validate` before each push; a failing validation aborts the push. If a pre-push hook already exists and
-wasn't installed by this script, installation refuses and prints how to combine them. Delete `.git/hooks/pre-push` to
-remove it.
+The hook runs `npm run validate` and aborts the push on failure. It refuses to overwrite an existing foreign hook; delete `.git/hooks/pre-push` to remove it. Nothing global is changed.
 
-## Evidence dashboard
+---
 
-```bash
-. ~/.nvm/nvm.sh
-npm run build && npm run start   # or: npm run dev
+## Architecture
+
+- **`src/core/`** — framework-independent engine: spec schema/validation (`rules/`), deterministic scenario generation (`generation/`), the mutation campaign + `AuthorizationAdapter` interface + report models (`mutation/`, `models/`). No Node, React, `pg` or adapter imports allowed (ESLint-enforced).
+- **`src/adapters/postgres/`** — the one implemented adapter: Docker lifecycle, fixture roles/RLS, scenario execution, transactional mutation, restoration fingerprint.
+- **`src/cli/`** — `lab`, `validate` and `db` entrypoints sharing `run.ts`; config loading (`config.ts`); report path constant (`paths.ts`).
+- **`app/`** — Next.js dashboard: `/` evidence view (reads the real report via `GET /api/report`; `POST /api/lab` spawns the fixed `npm run lab` only — no shell, no user input, `AAL_DISABLE_LAB_RUNS=1` to disable), `/spec` scenario generator UI.
+- **`examples/postgres-notes/`** — the fixture: `spec.json`, `schema.sql`, `mutations.json`, `target.json`.
+- **`tests/`** — unit tests + Docker integration tests (each suite uses its own container/port).
+
+### The permission specification (excerpt)
+
+```json
+{
+  "identities": [{ "id": "alice", "roles": ["member"] }, { "id": "bob", "roles": ["member"] }],
+  "resources": [{ "id": "note-a", "type": "note", "ownerId": "alice" }, { "id": "note-b", "type": "note", "ownerId": "bob" }],
+  "rules": [
+    { "id": "members-manage-own-notes", "effect": "allow", "subject": { "kind": "role", "role": "member" },
+      "resource": { "kind": "type", "type": "note" }, "actions": ["read", "update"], "ownership": "owner" },
+    { "id": "members-no-cross-user-access", "effect": "deny", "subject": { "kind": "role", "role": "member" },
+      "resource": { "kind": "type", "type": "note" }, "actions": ["read", "update"], "ownership": "non-owner" }
+  ],
+  "expectations": [{ "identityId": "alice", "resourceId": "note-b", "action": "read", "outcome": "deny" }]
+}
 ```
 
-Open http://localhost:3000. The page reads the real engine report from `reports/assurance-report.json` (via `GET /api/report`,
-which validates its structure and never fills in missing values). If no report exists it shows an empty state.
+Rules are evaluated with **default-deny** semantics; an allow and a deny matching the same case is a validation error (no precedence guessing); `ownership` is `any` / `owner` / `non-owner`. Invalid specs are rejected with exact field errors.
 
-- **Run lab** calls `POST /api/lab`, which starts the fixed command `npm run lab` on the server: no shell, no arguments, and
-  nothing from the request body is used, so the browser cannot choose a command or a database target. Only one run can be
-  active at a time; a run is stopped after 5 minutes. The request needs the `x-aal-action: run-lab` header and is refused
-  for cross-site requests. Set `AAL_DISABLE_LAB_RUNS=1` to turn the button off and use the CLI only. All CLI safeguards
-  (local disposable container, rollback, restoration check) still apply because the dashboard only runs the CLI.
-- If a run fails before writing a new report, the dashboard says so and keeps showing the earlier report as earlier.
-- `declared` badge = `declaredExpectation: true`: the scenario's outcome is pinned in the spec's `expectations` list as well
-  as derived from the rules (the validator rejects disagreements). Unmarked scenarios are derived from rules only.
-- Statuses come straight from the report: `caught`, `survived` (test-suite blind spot), `inconclusive` (mutation not applied
-  or a test errored), and overall `error` (setup, baseline or restoration failed).
-- The previous specification editor is at `/spec`.
+## Safety and limits
 
-## Current limitations
-
-- Exactly one backend adapter (PostgreSQL Row Level Security) and one mutation operator (`permissive-condition`).
-  Arbitrary backends, frameworks, HTTP APIs and Supabase are not supported yet.
-- The PostgreSQL adapter maps resource types to tables and actions to `SELECT`/`UPDATE` via `target.json`; `INSERT` and
-  `DELETE` are not mapped yet.
-- `npm run validate` only targets the disposable local Docker database; there is no way to point it at a remote host, but it also cannot yet validate an application that is not described by a project directory + adapter.\n- The dashboard runs on the same machine as Docker and is meant for local use; it has no authentication.
-- No attribute- or condition-based rules (time, tenant, field-level), role hierarchies, or wildcard actions.
-- The dashboard keeps everything in browser memory. Specifications are not saved, and there is no import or export.
+- **Disposable-local only.** Connections to non-127.0.0.1/localhost hosts are refused in code; the container is ephemeral; mutations run in rolled-back transactions. Nothing here can target a remote or production database.
+- **Current scope:** one adapter (`postgres-rls`), one mutation operator (`permissive-condition` on the notes SELECT policy), SELECT and UPDATE mapped. It does **not** scan arbitrary GitHub repositories, HTTP APIs, Supabase projects or other frameworks — the `AuthorizationAdapter` interface exists so more adapters can be added.
+- **Semantics:** a *survived* mutation means a test-suite blind spot, not automatically a production vulnerability; results come from an isolated test environment, not a real deployment.
+- Test identity via `app.current_user_id` is a **test adapter mechanism**, not a claim about any real authentication integration.
+- The dashboard is local-only (no authentication); run state lives in server memory.
