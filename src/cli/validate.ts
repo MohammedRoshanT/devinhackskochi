@@ -3,6 +3,7 @@ import { resolveRunOptions } from "./lab";
 import { run } from "./run";
 
 const { values: args } = parseArgs({
+  allowPositionals: true,
   options: {
     example: { type: "string" },
     config: { type: "string" },

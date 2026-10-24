@@ -5,6 +5,7 @@ import { DEFAULT_REPORT_PATH } from "./paths";
 import { run } from "./run";
 
 const { values: args } = parseArgs({
+  allowPositionals: true,
   options: {
     example: { type: "string" },
     config: { type: "string" },
