@@ -1,5 +1,5 @@
-import { Dashboard } from "./components/dashboard";
+import { EvidenceDashboard } from "./components/evidence-dashboard";
 
 export default function Home() {
-  return <Dashboard />;
+  return <EvidenceDashboard />;
 }

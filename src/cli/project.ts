@@ -6,6 +6,7 @@ import { parseSpecification } from "../core/rules/validation";
 import { postgresTargetSchema } from "../adapters/postgres/target";
 
 export const DEFAULT_EXAMPLE = "examples/postgres-notes";
+export { DEFAULT_REPORT_PATH } from "./paths";
 
 export async function loadProject(directory = DEFAULT_EXAMPLE) {
   const dir = resolve(process.cwd(), directory);

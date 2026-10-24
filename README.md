@@ -147,12 +147,34 @@ connection dropped before rollback).
 Next.js or Supabase there). `src/core/mutation/engine.ts` defines the `AuthorizationAdapter` interface and the campaign
 logic; `src/adapters/postgres/` is the only implementation; `src/cli/` wires them together.
 
+## Evidence dashboard
+
+```bash
+. ~/.nvm/nvm.sh
+npm run build && npm run start   # or: npm run dev
+```
+
+Open http://localhost:3000. The page reads the real engine report from `reports/assurance-report.json` (via `GET /api/report`,
+which validates its structure and never fills in missing values). If no report exists it shows an empty state.
+
+- **Run lab** calls `POST /api/lab`, which starts the fixed command `npm run lab` on the server: no shell, no arguments, and
+  nothing from the request body is used, so the browser cannot choose a command or a database target. Only one run can be
+  active at a time; a run is stopped after 5 minutes. The request needs the `x-aal-action: run-lab` header and is refused
+  for cross-site requests. Set `AAL_DISABLE_LAB_RUNS=1` to turn the button off and use the CLI only. All CLI safeguards
+  (local disposable container, rollback, restoration check) still apply because the dashboard only runs the CLI.
+- If a run fails before writing a new report, the dashboard says so and keeps showing the earlier report as earlier.
+- `declared` badge = `declaredExpectation: true`: the scenario's outcome is pinned in the spec's `expectations` list as well
+  as derived from the rules (the validator rejects disagreements). Unmarked scenarios are derived from rules only.
+- Statuses come straight from the report: `caught`, `survived` (test-suite blind spot), `inconclusive` (mutation not applied
+  or a test errored), and overall `error` (setup, baseline or restoration failed).
+- The previous specification editor is at `/spec`.
+
 ## Current limitations
 
 - Exactly one backend adapter (PostgreSQL Row Level Security) and one mutation operator (`permissive-condition`).
   Arbitrary backends, frameworks, HTTP APIs and Supabase are not supported yet.
 - The PostgreSQL adapter maps resource types to tables and actions to `SELECT`/`UPDATE` via `target.json`; `INSERT` and
   `DELETE` are not mapped yet.
-- The dashboard does not show execution or mutation results; use the CLI.
+- The dashboard runs on the same machine as Docker and is meant for local use; it has no authentication.
 - No attribute- or condition-based rules (time, tenant, field-level), role hierarchies, or wildcard actions.
 - The dashboard keeps everything in browser memory. Specifications are not saved, and there is no import or export.

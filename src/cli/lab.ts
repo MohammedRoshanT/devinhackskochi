@@ -6,12 +6,12 @@ import { adminConnection, defaultContainer, startContainer, stopContainer, waitF
 import { initializeDatabase } from "../adapters/postgres/fixture";
 import type { AssuranceReport, SuiteRun } from "../core/models/results";
 import { runMutationCampaign } from "../core/mutation/engine";
-import { DEFAULT_EXAMPLE, loadProject } from "./project";
+import { DEFAULT_EXAMPLE, DEFAULT_REPORT_PATH, loadProject } from "./project";
 
 const { values: args } = parseArgs({
   options: {
     example: { type: "string", default: DEFAULT_EXAMPLE },
-    report: { type: "string", default: "reports/assurance-report.json" },
+    report: { type: "string", default: DEFAULT_REPORT_PATH },
     "keep-db": { type: "boolean", default: false },
     "reuse-db": { type: "boolean", default: false },
   },
