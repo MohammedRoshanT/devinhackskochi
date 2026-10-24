@@ -87,9 +87,72 @@ The validator rejects ambiguous inputs instead of guessing:
   declared case is accepted with an `unmatched-rule` warning, because it may conflict with entities added later.
 - **Multiple roles** are combined: an identity matches every rule that targets any of its roles.
 
+## End-to-end mutation workflow (PostgreSQL RLS)
+
+One command starts a disposable PostgreSQL 16 container, creates the demo schema, runs the generated authorization tests,
+applies a controlled mutation, checks whether the tests catch it, verifies restoration, and removes the container:
+
+```bash
+. ~/.nvm/nvm.sh
+npm run lab            # exit code 0 = all mutations caught, 2 = a mutation survived, 1 = error/inconclusive
+```
+
+Options: `--keep-db` (leave the container running), `--reuse-db` (use a container started with `npm run db:start`),
+`--report <path>` (default `reports/assurance-report.json`), `--example <dir>` (default `examples/postgres-notes`).
+Separate steps: `npm run db:start`, `npm run db:init`, `npm run db:stop`. Requires Docker. Set `AAL_PG_PORT` to change
+the host port (default 55432).
+
+**Inputs** (`examples/postgres-notes/`): `spec.json` (permission specification, including declared `expectations`, which
+must agree with the rules), `mutations.json`, `target.json` (adapter mapping from resource types and actions to tables and
+SQL operations), and `schema.sql` (the system under test: a `notes` table with ownership-based RLS policies).
+
+**Isolation and safety**
+- The container uses `postgres:16-alpine`, binds to `127.0.0.1` only, and keeps its data in `tmpfs`. The adapter refuses
+  non-local hosts. Only containers labelled by the lab are ever removed.
+- The table is owned by `aal_owner` with `FORCE ROW LEVEL SECURITY`. Tests run as `aal_app` (no superuser, no
+  `BYPASSRLS`, not the owner) via `SET LOCAL ROLE`; each run checks this before executing.
+- Every scenario runs inside a savepoint of a transaction that is always rolled back, so probe writes are never kept.
+- The mutation (`ALTER POLICY … USING (true)`) and the mutated-policy tests run in a single transaction on one connection
+  and are rolled back whether the tests pass, fail or throw. Server-side `statement_timeout`, `lock_timeout` and
+  `idle_in_transaction_session_timeout` mean a crashed or hung client cannot keep the change open; PostgreSQL aborts
+  uncommitted DDL when the connection drops. Afterwards a fresh connection compares tables, policies, grants and the
+  identity helper with the pre-mutation snapshot, and the full baseline is re-run.
+
+**Test identity (test adapter only).** The adapter sets the identity with `set_config('app.current_user_id', <id>, true)`
+and policies read it through `app.current_user_id()`. This simulates an authenticated user for testing; it is not an
+authentication integration and does not model how a real application establishes identity.
+
+**How outcomes are observed**
+- Read: the superuser first confirms the row exists, then the app role runs `SELECT`. Zero rows means denied (RLS filters
+  rows silently rather than raising an error); one row means allowed.
+- Update: the app role runs `UPDATE`; the adapter records rows affected, then checks as the superuser whether the data
+  actually changed. A disagreement between the two, or any unexpected SQL error, is reported as an error, not a result.
+
+**Mutation status**
+- `caught`: the mutation applied cleanly and at least one relevant scenario observed an outcome different from the spec.
+- `survived`: every relevant scenario still matched the spec. This is a blind spot in the generated suite, not
+  automatically a production vulnerability.
+- `inconclusive`: the mutation could not be applied, or any scenario errored. Errors are never counted as detection.
+- Mutations only run if the baseline fully passes; the campaign stops with `error` if restoration cannot be verified.
+
+The JSON report (`AssuranceReport` in `src/core/models/results.ts`) contains environment checks, generated scenarios,
+baseline results with evidence (rows returned, rows affected, data changed), each mutation's exact SQL with the policy
+before and after, expected versus observed outcomes, status and reason, restoration verification, and the re-run baseline.
+
+**Tests:** `npm test` (unit, including a fake adapter for the engine) and `npm run test:integration` (Docker; covers the
+caught mutation, an injected failure after the mutation is applied, an inapplicable mutation, a surviving mutation, and a
+connection dropped before rollback).
+
+**Architecture:** `src/core/` stays framework-independent (ESLint forbids importing `pg`, `node:*`, adapters, CLI, React,
+Next.js or Supabase there). `src/core/mutation/engine.ts` defines the `AuthorizationAdapter` interface and the campaign
+logic; `src/adapters/postgres/` is the only implementation; `src/cli/` wires them together.
+
 ## Current limitations
 
-- No live API scanning, database connections, backend adapters, policy mutation, or remediation. `TestExecutionResult`
-  and `MutationResult` in `src/core/models/results.ts` are type contracts only; nothing produces them yet.
+- Exactly one backend adapter (PostgreSQL Row Level Security) and one mutation operator (`permissive-condition`).
+  Arbitrary backends, frameworks, HTTP APIs and Supabase are not supported yet.
+- The PostgreSQL adapter maps resource types to tables and actions to `SELECT`/`UPDATE` via `target.json`; `INSERT` and
+  `DELETE` are not mapped yet.
+- The dashboard does not show execution or mutation results; use the CLI.
 - No attribute- or condition-based rules (time, tenant, field-level), role hierarchies, or wildcard actions.
 - The dashboard keeps everything in browser memory. Specifications are not saved, and there is no import or export.

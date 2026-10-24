@@ -1,5 +1,5 @@
 import type { AuthorizationScenario } from "../models/results";
-import { compareIds, enumerateCases, matchesRule } from "../rules/evaluation";
+import { caseKey, enumerateCases, expectedOutcomeFor } from "../rules/evaluation";
 import { validateSpecification, type SpecificationIssue, type SpecificationWarning } from "../rules/validation";
 
 export class InvalidSpecificationError extends Error {
@@ -19,15 +19,15 @@ export function generateScenarios(input: unknown): GenerationResult {
   if (!validation.valid) throw new InvalidSpecificationError(validation.issues);
   const spec = validation.specification;
   const scenarios: AuthorizationScenario[] = [];
+  const declared = new Set((spec.expectations ?? []).map((e) => caseKey(e.identityId, e.resourceId, e.action)));
 
   for (const context of enumerateCases(spec)) {
-    const matching = spec.rules.filter((rule) => matchesRule(rule, context)).sort((a, b) => compareIds(a.id, b.id));
-    const expectedOutcome = matching[0]?.effect ?? spec.defaultOutcome;
+    const { matching, outcome: expectedOutcome } = expectedOutcomeFor(spec, context);
     const matchedRuleIds = matching.map((rule) => rule.id);
     scenarios.push({
       id: `case:${context.identity.id}:${context.resource.id}:${context.action}`,
       identityId: context.identity.id,
-      roles: [...context.identity.roles].sort(compareIds),
+      roles: [...context.identity.roles].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0)),
       resourceId: context.resource.id,
       resourceType: context.resource.type,
       ownerId: context.resource.ownerId ?? null,
@@ -35,6 +35,7 @@ export function generateScenarios(input: unknown): GenerationResult {
       expectedOutcome,
       basis: matching.length ? "explicit-rule" : "default-deny",
       matchedRuleIds,
+      declaredExpectation: declared.has(caseKey(context.identity.id, context.resource.id, context.action)),
       explanation: matching.length
         ? `Expected ${expectedOutcome}: matched ${matchedRuleIds.join(", ")}.`
         : "Expected deny: no explicit rule matches; default-deny applies.",

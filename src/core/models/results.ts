@@ -11,25 +11,90 @@ export interface AuthorizationScenario {
   expectedOutcome: AuthorizationOutcome;
   basis: "explicit-rule" | "default-deny";
   matchedRuleIds: string[];
+  /** True when the specification's `expectations` list pins this outcome explicitly. */
+  declaredExpectation: boolean;
   explanation: string;
 }
 
-// Contracts for future adapters; generation never creates execution or mutation results.
-export type TestExecutionResult = {
+export type Evidence = Record<string, string | number | boolean | null>;
+
+/** What an adapter actually observed when executing one scenario. */
+export type Observation =
+  | { status: "completed"; observedOutcome: AuthorizationOutcome; evidence: Evidence }
+  | { status: "error"; message: string; evidence?: Evidence };
+
+export type ScenarioResult = {
   scenarioId: string;
-  adapterId: string;
-  durationMs: number;
+  identityId: string;
+  resourceId: string;
+  action: string;
+  expectedOutcome: AuthorizationOutcome;
 } & (
-  | { status: "completed"; expectedOutcome: AuthorizationOutcome; observedOutcome: AuthorizationOutcome; verdict: "passed" | "failed" }
-  | { status: "error"; message: string }
+  | { status: "completed"; observedOutcome: AuthorizationOutcome; verdict: "passed" | "failed"; evidence: Evidence }
+  | { status: "error"; verdict: "error"; message: string; evidence?: Evidence }
 );
 
-export type MutationResult = {
-  mutationId: string;
-  adapterId: string;
-  environment: "isolated-test";
-} & (
-  | { status: "detected"; detectedByScenarioIds: [string, ...string[]]; executions: TestExecutionResult[] }
-  | { status: "survived"; detectedByScenarioIds: []; executions: TestExecutionResult[] }
-  | { status: "inconclusive"; reason: string }
-);
+export interface SuiteRun {
+  total: number;
+  passed: number;
+  failed: number;
+  errors: number;
+  allPassed: boolean;
+  results: ScenarioResult[];
+}
+
+export interface MutationDefinition {
+  id: string;
+  /** Replace the condition of every policy guarding `target` with an always-true condition. */
+  operator: "permissive-condition";
+  description: string;
+  target: { resourceType: string; action: string };
+}
+
+export interface AppliedChange {
+  description: string;
+  statements: string[];
+  before: string;
+  after: string;
+}
+
+export interface EnvironmentCheck {
+  name: string;
+  passed: boolean;
+  detail: string;
+}
+
+export interface RestorationCheck {
+  verified: boolean;
+  method: string;
+  expectedFingerprint: string | null;
+  observedFingerprint: string | null;
+  message: string;
+}
+
+export type MutationStatus = "caught" | "survived" | "inconclusive";
+
+export interface MutationReport {
+  mutation: MutationDefinition;
+  status: MutationStatus;
+  reason: string;
+  change: AppliedChange | null;
+  relevantScenarioIds: string[];
+  caughtBy: string[];
+  suite: SuiteRun | null;
+  restoration: RestorationCheck;
+}
+
+export interface AssuranceReport {
+  schemaVersion: 1;
+  generatedAt: string;
+  specification: string;
+  adapter: { id: string; description: string };
+  outcome: { status: "all-caught" | "survivors" | "inconclusive" | "error"; message: string };
+  environment: { ok: boolean; checks: EnvironmentCheck[] };
+  scenarios: AuthorizationScenario[];
+  baseline: SuiteRun | null;
+  mutations: MutationReport[];
+  baselineAfterRestore: SuiteRun | null;
+  notes: string[];
+}

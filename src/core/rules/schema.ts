@@ -37,6 +37,12 @@ export const permissionSpecificationSchema = z.object({
     actions: z.array(id).min(1).max(32),
     ownership: z.enum(["any", "owner", "non-owner"]),
   }).strict()).max(256),
+  expectations: z.array(z.object({
+    identityId: id,
+    resourceId: id,
+    action: id,
+    outcome: z.enum(["allow", "deny"]),
+  }).strict()).max(256).optional(),
 }).strict();
 
 export type PermissionSpecification = z.infer<typeof permissionSpecificationSchema>;
@@ -44,3 +50,4 @@ export type PermissionRule = PermissionSpecification["rules"][number];
 export type Identity = PermissionSpecification["identities"][number];
 export type Resource = PermissionSpecification["resources"][number];
 export type AuthorizationOutcome = PermissionRule["effect"];
+export type DeclaredExpectation = NonNullable<PermissionSpecification["expectations"]>[number];

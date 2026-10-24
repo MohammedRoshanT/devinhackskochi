@@ -10,7 +10,7 @@ export default defineConfig([
     rules: {
       "no-restricted-imports": ["error", {
         patterns: [{
-          group: ["react", "react/*", "react-dom", "react-dom/*", "next", "next/*", "@supabase/*", "@/app/*"],
+          group: ["react", "react/*", "react-dom", "react-dom/*", "next", "next/*", "@supabase/*", "pg", "pg/*", "node:*", "@/app/*", "**/adapters/**", "**/cli/**"],
           message: "The authorization core must remain independent of UI and backend frameworks.",
         }],
       }],

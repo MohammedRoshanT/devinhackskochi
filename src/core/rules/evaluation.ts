@@ -23,6 +23,13 @@ export function matchesRule(rule: PermissionRule, { identity, resource, action }
   return subjectMatches && resourceMatches && ownershipMatches && rule.actions.includes(action);
 }
 
+export function expectedOutcomeFor(spec: PermissionSpecification, context: AuthorizationCase) {
+  const matching = spec.rules.filter((rule) => matchesRule(rule, context)).sort((a, b) => compareIds(a.id, b.id));
+  return { matching, outcome: matching[0]?.effect ?? spec.defaultOutcome };
+}
+
+export const caseKey = (identityId: string, resourceId: string, action: string) => `${identityId}:${resourceId}:${action}`;
+
 export function* enumerateCases(spec: PermissionSpecification): Generator<AuthorizationCase> {
   const identities = [...spec.identities].sort((a, b) => compareIds(a.id, b.id));
   const resources = [...spec.resources].sort((a, b) => compareIds(a.id, b.id));
