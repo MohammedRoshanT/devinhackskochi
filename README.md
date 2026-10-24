@@ -147,6 +147,43 @@ connection dropped before rollback).
 Next.js or Supabase there). `src/core/mutation/engine.ts` defines the `AuthorizationAdapter` interface and the campaign
 logic; `src/adapters/postgres/` is the only implementation; `src/cli/` wires them together.
 
+## Validating authorization before a push
+
+`npm run validate` runs the full validation for the project configured in `aal.config.json`: it starts the disposable
+local PostgreSQL container, requires the secure baseline to pass, applies each mutation in a rolled-back transaction,
+verifies restoration against the captured authorization-state fingerprint, and re-runs the baseline.
+
+Exit codes: `0` validated (all mutations caught), `2` a mutation survived, `1` anything else failed — baseline failure,
+environment failure, an inconclusive mutation, unverified restoration, or an execution error. The structured report is
+written to `reports/assurance-report.json`.
+
+### Project configuration (`aal.config.json`)
+
+```json
+{
+  "version": 1,
+  "adapter": "postgres-rls",
+  "project": { "dir": "examples/postgres-notes" }
+}
+```
+
+`project.dir` points to a directory containing `spec.json`, `schema.sql`, `mutations.json` and `target.json`, relative to
+the config file. `postgres-rls` is currently the only supported adapter value; unknown adapters and unknown fields are
+rejected. `--config`, `--example` and `--report` flags override the config. There is deliberately no repository-URL field:
+the tool only tests a checked-out local project against the disposable local database — never a remote host
+(`assertLocal` refuses non-local connections).
+
+### Optional pre-push hook
+
+```bash
+npm run hooks:install
+```
+
+This copies `scripts/git-hooks/pre-push` to `.git/hooks/pre-push` (local repo only — nothing global is touched) and makes
+it run `npm run validate` before each push; a failing validation aborts the push. If a pre-push hook already exists and
+wasn't installed by this script, installation refuses and prints how to combine them. Delete `.git/hooks/pre-push` to
+remove it.
+
 ## Evidence dashboard
 
 ```bash
@@ -175,6 +212,6 @@ which validates its structure and never fills in missing values). If no report e
   Arbitrary backends, frameworks, HTTP APIs and Supabase are not supported yet.
 - The PostgreSQL adapter maps resource types to tables and actions to `SELECT`/`UPDATE` via `target.json`; `INSERT` and
   `DELETE` are not mapped yet.
-- The dashboard runs on the same machine as Docker and is meant for local use; it has no authentication.
+- `npm run validate` only targets the disposable local Docker database; there is no way to point it at a remote host, but it also cannot yet validate an application that is not described by a project directory + adapter.\n- The dashboard runs on the same machine as Docker and is meant for local use; it has no authentication.
 - No attribute- or condition-based rules (time, tenant, field-level), role hierarchies, or wildcard actions.
 - The dashboard keeps everything in browser memory. Specifications are not saved, and there is no import or export.

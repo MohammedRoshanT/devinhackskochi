@@ -1,0 +1,8 @@
+{
+  "version": 1,
+  "name": "PostgreSQL RLS demo",
+  "adapter": "postgres-rls",
+  "project": {
+    "dir": "examples/postgres-notes"
+  }
+}

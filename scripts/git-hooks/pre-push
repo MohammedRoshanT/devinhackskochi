@@ -1,0 +1,19 @@
+#!/bin/sh
+# Installed by `npm run hooks:install`. Runs the authorization validation before a push;
+# a failing validation blocks the push. The validation only ever targets the disposable
+# local Docker container configured in aal.config.json — no remote/production database.
+set -eu
+
+ROOT=$(git rev-parse --show-toplevel)
+cd "$ROOT"
+
+if ! command -v npm >/dev/null 2>&1; then
+  [ -s "${NVM_DIR:-$HOME/.nvm}/nvm.sh" ] && . "${NVM_DIR:-$HOME/.nvm}/nvm.sh" >/dev/null 2>&1 || true
+fi
+if ! command -v npm >/dev/null 2>&1; then
+  echo "aal pre-push: npm not found; cannot run 'npm run validate'." >&2
+  exit 1
+fi
+
+echo "aal pre-push: running 'npm run validate' (local disposable PostgreSQL only)…"
+npm run validate
