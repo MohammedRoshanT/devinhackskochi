@@ -18,7 +18,9 @@
     "db:start": "tsx src/cli/db.ts start",
     "db:init": "tsx src/cli/db.ts init",
     "db:stop": "tsx src/cli/db.ts stop",
-    "check": "npm run test && npm run typecheck && npm run lint && npm run build"
+    "check": "npm run test && npm run typecheck && npm run lint && npm run build",
+    "validate": "tsx src/cli/validate.ts",
+    "hooks:install": "sh scripts/install-hooks.sh"
   },
   "dependencies": {
     "next": "^16.4.3",

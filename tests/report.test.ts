@@ -29,6 +29,6 @@ describe("dashboard report parsing", () => {
   });
 
   it("the dashboard reads the same path the CLI writes", () => {
-    expect(readFileSync("src/cli/lab.ts", "utf8")).toContain("default: DEFAULT_REPORT_PATH");
+    expect(readFileSync("src/cli/paths.ts", "utf8")).toContain("reports/assurance-report.json");
   });
 });
